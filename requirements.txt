@@ -1,4 +1,6 @@
-tensorflow-cpu
-matplotlib
+tensorflow
+Flask
+gunicorn
 numpy
-pillow
+Pillow
+matplotlib
