@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Family Smile Detector</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f8f9fa; padding-top: 50px; }
+        .container { max-width: 600px; background: white; padding: 30px; border-radius: 15px; shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        #result-image { max-width: 100%; margin-top: 20px; border-radius: 10px; display: none; }
+        .loading { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="container text-center">
+    <h1 class="mb-4">😊 Family Smile Detector</h1>
+    <p class="text-muted">複数人の写真でもOK！誰か一人でも笑顔なら判定します。</p>
+
+    <div class="mb-3">
+        <input class="form-control" type="file" id="image-input" accept="image/*,image/heic">
+    </div>
+    
+    <button class="btn btn-primary btn-lg w-100" onclick="uploadImage()" id="upload-btn">笑顔をチェック！</button>
+
+    <div class="loading mt-3">
+        <div class="spinner-border text-primary" role="status"></div>
+        <p>AIが判定中...</p>
+    </div>
+
+    <div id="result-area" class="mt-4">
+        <h3 id="overall-result"></h3>
+        <p id="face-count" class="text-secondary"></p>
+        <img id="result-image" src="" alt="判定結果画像">
+    </div>
+</div>
+
+<script>
+async function uploadImage() {
+    const input = document.getElementById('image-input');
+    const btn = document.getElementById('upload-btn');
+    const loading = document.querySelector('.loading');
+    const resultImage = document.getElementById('result-image');
+    const overallResult = document.getElementById('overall-result');
+    const faceCount = document.getElementById('face-count');
+
+    if (input.files.length === 0) {
+        alert("画像を選択してください");
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', input.files[0]);
+
+    // UIを「判定中」にする
+    btn.disabled = true;
+    loading.style.display = 'block';
+    resultImage.style.display = 'none';
+    overallResult.innerText = "";
+    faceCount.innerText = "";
+
+    try {
+        const response = await fetch('/predict', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await response.json();
+
+        if (data.error) {
+            alert("エラー: " + data.error);
+        } else {
+            // 結果を表示
+            overallResult.innerText = data.overall_result;
+            faceCount.innerText = `検出された顔: ${data.face_count}名`;
+            resultImage.src = data.image_data;
+            resultImage.style.display = 'block';
+        }
+    } catch (e) {
+        alert("判定に失敗しました");
+    } finally {
+        btn.disabled = false;
+        loading.style.display = 'none';
+    }
+}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,21 @@
+# --- AI学習データ（重いため除外） ---
+data/
+natural_data/
+smile_data/
+
+# --- Python仮想環境（uv / venv） ---
+.venv/
+__pycache__/
+*.py[cod]
+
+# --- OSが勝手に作る不要ファイル ---
+.DS_Store
+Thumbs.db
+
+# --- 大きなモデルファイル（GitHub制限に引っかかる場合） ---
+# もしGoogleドライブ経由で配布するなら、ここでも除外設定にします
+*.keras
+*.h5
+
+# --- Renderなどの一時ファイル ---
+.render/
