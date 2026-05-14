@@ -1,16 +1,23 @@
 import os
+# --- メモリ節約のための設定 (最優先) ---
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'      # ログ出力を最小限にしてメモリ節約
+os.environ['TF_FORCE_CPU_AUTOTUNE_STATS'] = '1'
+os.environ['OMP_NUM_THREADS'] = '1'           # 並列処理を制限してメモリ消費を抑える
+
 import io
 import base64
 import numpy as np
 import cv2
-import gdown  # Googleドライブからのダウンロード用
+import gdown
+import tensorflow as tf
 from flask import Flask, request, jsonify, render_template
 from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing import image
 from PIL import Image, ImageDraw
 
-# --- 1. 顔検出の設定 (OpenCV Haar Cascade) ---
-face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+# --- TensorFlowの追加メモリ制限 ---
+tf.config.threading.set_inter_op_parallelism_threads(1)
+tf.config.threading.set_intra_op_parallelism_threads(1)
 
 # HEIC形式への対応
 try:
@@ -21,11 +28,13 @@ except ImportError:
 
 app = Flask(__name__)
 
+# --- 顔検出の設定 (OpenCV Haar Cascade) ---
+face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+
 # --- 2. 自作AIモデルの読み込みとダウンロード設定 ---
 MODEL_PATH = 'best_smile_model_v4.keras'
 
 # 【重要】ここにあなたのGoogleドライブのファイルIDを入れてください
-# 例: https://drive.google.com/file/d/1ABC123... の「1ABC123...」の部分
 FILE_ID = '12OnNsDlw2cO20HJy941auA74zOAiUuvM'
 
 model = None
@@ -38,7 +47,6 @@ def load_saved_model():
         print("📥 モデルファイルが見つかりません。Googleドライブからダウンロードを開始します...")
         url = f'https://drive.google.com/uc?id={FILE_ID}'
         try:
-            # gdownを使って直リンクでダウンロード
             gdown.download(url, MODEL_PATH, quiet=False)
         except Exception as e:
             print(f"❌ ダウンロードに失敗しました: {e}")
@@ -47,6 +55,8 @@ def load_saved_model():
     # 2. モデルの読み込み
     if os.path.exists(MODEL_PATH):
         try:
+            # メモリ節約のためセッションをクリアしてからロード
+            tf.keras.backend.clear_session()
             model = load_model(MODEL_PATH, compile=False)
             print(f"✅ AIモデル '{MODEL_PATH}' のロードに成功しました。")
         except Exception as e:
@@ -73,8 +83,8 @@ def predict():
         # 画像の読み込み
         img_pil = Image.open(file.stream).convert('RGB')
         
-        # 巨大画像対策（長辺1200pxに制限）
-        max_limit = 1200
+        # 巨大画像対策（さらに小さめの1000pxに制限してメモリを保護）
+        max_limit = 1000
         if max(img_pil.size) > max_limit:
             img_pil.thumbnail((max_limit, max_limit), Image.Resampling.LANCZOS)
 
@@ -119,7 +129,7 @@ def predict():
 
         # 結果画像のBase64化
         buffered = io.BytesIO()
-        img_pil.save(buffered, format="JPEG", quality=85)
+        img_pil.save(buffered, format="JPEG", quality=80) # 画質を少し下げて転送速度を稼ぐ
         img_str = base64.b64encode(buffered.getvalue()).decode()
 
         return jsonify({
@@ -129,14 +139,11 @@ def predict():
         })
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()
         return jsonify({"error": f"サーバーエラー: {str(e)}"}), 500
 
 if __name__ == '__main__':
-    # 起動時に一度だけモデル準備（ダウンロード含む）を実行
+    # 起動時にモデルを準備
     load_saved_model()
     
     port = int(os.environ.get("PORT", 10000))
-    print(f"🚀 SmilePicker Server is starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
