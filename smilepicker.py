@@ -1,8 +1,8 @@
 import os
-# --- メモリ節約のための設定 (最優先) ---
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'      # ログ出力を最小限にしてメモリ節約
+# --- メモリ節約設定 (最優先) ---
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 os.environ['TF_FORCE_CPU_AUTOTUNE_STATS'] = '1'
-os.environ['OMP_NUM_THREADS'] = '1'           # 並列処理を制限してメモリ消費を抑える
+os.environ['OMP_NUM_THREADS'] = '1'
 
 import io
 import base64
@@ -16,59 +16,45 @@ from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing import image
 from PIL import Image, ImageDraw
 
-# --- TensorFlowの追加メモリ制限 ---
+# TensorFlowのメモリ消費を最小限に抑える
 tf.config.threading.set_inter_op_parallelism_threads(1)
 tf.config.threading.set_intra_op_parallelism_threads(1)
 
-# HEIC形式への対応
-try:
-    from pillow_heif import register_heif_opener
-    register_heif_opener()
-except ImportError:
-    print("⚠️ pillow-heifがインストールされていないため、HEICは利用できません。")
-
 app = Flask(__name__)
 
-# --- 顔検出の設定 (OpenCV Haar Cascade) ---
+# 顔検出器
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
-# --- AIモデルの読み込みとダウンロード設定 ---
+# モデル設定
 MODEL_PATH = 'best_smile_model_v4.keras'
 FILE_ID = '12OnNsDlw2cO20HJy941auA74zOAiUuvM'
-
 model = None
 
 def load_saved_model():
     global model
-    
-    # 1. モデルファイルが存在しない場合はダウンロードを実行
     if not os.path.exists(MODEL_PATH):
-        print("📥 モデルファイルが見つかりません。Googleドライブからダウンロードを開始します...")
+        print("📥 ダウンロード開始...")
         url = f'https://drive.google.com/uc?id={FILE_ID}'
         try:
             gdown.download(url, MODEL_PATH, quiet=False)
         except Exception as e:
-            print(f"❌ ダウンロードに失敗しました: {e}")
+            print(f"❌ ダウンロード失敗: {e}")
             return
 
-    # 2. モデルの読み込み
     if os.path.exists(MODEL_PATH):
         try:
-            # メモリ節約のためセッションをクリアしてからロード
+            # 💡 【重要】メモリ節約のため、グラフを初期化してからロード
             tf.keras.backend.clear_session()
-            # compile=False でロード時間を短縮
+            # compile=False にすることで、学習用パラメータを読み込まず推論専用にしてメモリを節約
             model = load_model(MODEL_PATH, compile=False)
-            print(f"✅ AIモデル '{MODEL_PATH}' のロードに成功しました。")
+            print(f"✅ AIモデルロード成功")
         except Exception as e:
-            print(f"❌ モデル読み込みエラー:\n{traceback.format_exc()}")
-    else:
-        print(f"⚠️ {MODEL_PATH} の準備ができていないため、判定は利用できません。")
+            print(f"❌ ロード失敗:\n{traceback.format_exc()}")
+            model = None
 
-# --- Gunicorn起動時でも確実にロードを実行する ---
+# 起動時にロード
 with app.app_context():
     load_saved_model()
-
-# --- ルーティングと判定ロジック ---
 
 @app.route('/')
 def index():
@@ -77,52 +63,34 @@ def index():
 @app.route('/predict', methods=['POST'])
 def predict():
     global model
-    
-    # 実行時にモデルがない場合は再ロードを試みる
     if model is None:
         load_saved_model()
         if model is None:
-            return jsonify({"error": "AIモデルのロードに失敗しています。サーバーログを確認してください。"}), 500
+            return jsonify({"error": "AIモデルが読み込まれていません。"}), 500
     
     file = request.files.get('file')
-    if not file:
-        return jsonify({"error": "ファイルがアップロードされていません。"}), 400
+    if not file: return jsonify({"error": "ファイルがありません"}), 400
     
     try:
-        # 画像の読み込み
+        # 💡 画像サイズをさらに小さく制限（メモリ保護）
         img_pil = Image.open(file.stream).convert('RGB')
+        img_pil.thumbnail((600, 600), Image.Resampling.LANCZOS)
         
-        # 巨大画像対策（1000px程度に抑えつつ画質を維持）
-        max_limit = 1000
-        if max(img_pil.size) > max_limit:
-            img_pil.thumbnail((max_limit, max_limit), Image.Resampling.LANCZOS)
-
         img_np = np.array(img_pil)
-        
-        # 顔検出用グレースケール変換
         gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
-        h, w = gray.shape
-        
-        # 顔検出
-        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+        faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(30, 30))
         
         draw = ImageDraw.Draw(img_pil)
-        face_count = len(faces)
         any_smile = False
 
         for (x, y, fw, fh) in faces:
-            # 顔切り抜き
-            face_crop = img_pil.crop((max(0, x), max(0, y), min(w, x + fw), min(h, y + fh)))
+            face_crop = img_pil.crop((x, y, x + fw, y + fh))
+            face_resize = face_crop.resize((224, 224))
             
-            # モデルの入力サイズ（224x224）へリサイズ
-            face_resize = face_crop.resize((224, 224), Image.Resampling.LANCZOS)
-            
-            # 推論用前処理
             x_input = image.img_to_array(face_resize)
-            x_input = np.expand_dims(x_input, axis=0)
-            x_input /= 255.0
+            x_input = np.expand_dims(x_input, axis=0) / 255.0
 
-            # 笑顔判定
+            # 推論実行
             preds = model.predict(x_input, verbose=0)
             smile_score = float(preds[0][1]) 
 
@@ -130,29 +98,17 @@ def predict():
             color = (0, 255, 0) if is_smile else (255, 0, 0)
             if is_smile: any_smile = True
 
-            # 枠とラベルの描画
-            label = f"{'Smile' if is_smile else 'Neutral'}: {smile_score*100:.1f}%"
-            line_w = max(2, int(max(img_pil.size) / 200))
-            draw.rectangle([x, y, x + fw, y + fh], outline=color, width=line_w)
-            draw.text((x, max(0, y - 20)), label, fill=color)
+            draw.rectangle([x, y, x + fw, y + fh], outline=color, width=3)
 
-        # 結果画像のBase64化
         buffered = io.BytesIO()
-        # 画質を95に引き上げ、AIが特徴を捉えやすくする
-        img_pil.save(buffered, format="JPEG", quality=95) 
+        img_pil.save(buffered, format="JPEG", quality=85)
         img_str = base64.b64encode(buffered.getvalue()).decode()
 
         return jsonify({
-            "face_count": face_count,
-            "overall_result": f"{face_count}人の顔を検出！ " + ("笑顔をキャッチしました！😊" if any_smile else "笑顔は見つかりませんでした😐"),
+            "face_count": len(faces),
+            "overall_result": "笑顔を検出しました！" if any_smile else "笑顔は見つかりませんでした",
             "image_data": f"data:image/jpeg;base64,{img_str}"
         })
-
-    except Exception as e:
-        error_details = traceback.format_exc()
-        print(f"❌ predict関数内でエラー発生:\n{error_details}")
-        return jsonify({"error": f"サーバーエラー詳細:\n{str(e)}"}), 500
-
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    except Exception:
+        print(traceback.format_exc())
+        return jsonify({"error": "判定に失敗しました"}), 500
