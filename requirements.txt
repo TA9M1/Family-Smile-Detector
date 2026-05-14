@@ -1,4 +1,4 @@
-tensorflow
+tensorflow-cpu
 Flask
 gunicorn
 numpy
@@ -6,3 +6,4 @@ Pillow
 matplotlib
 opencv-python-headless
 gdown
+pillow-heif
