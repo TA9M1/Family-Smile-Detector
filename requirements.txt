@@ -4,3 +4,5 @@ gunicorn
 numpy
 Pillow
 matplotlib
+opencv-python-headless
+gdown
