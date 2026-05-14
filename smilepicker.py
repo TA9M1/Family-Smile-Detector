@@ -32,7 +32,7 @@ app = Flask(__name__)
 # --- 顔検出の設定 (OpenCV Haar Cascade) ---
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
-# --- 2. 自作AIモデルの読み込みとダウンロード設定 ---
+# --- AIモデルの読み込みとダウンロード設定 ---
 MODEL_PATH = 'best_smile_model_v4.keras'
 FILE_ID = '12OnNsDlw2cO20HJy941auA74zOAiUuvM'
 
@@ -56,6 +56,7 @@ def load_saved_model():
         try:
             # メモリ節約のためセッションをクリアしてからロード
             tf.keras.backend.clear_session()
+            # compile=False でロード時間を短縮
             model = load_model(MODEL_PATH, compile=False)
             print(f"✅ AIモデル '{MODEL_PATH}' のロードに成功しました。")
         except Exception as e:
@@ -63,11 +64,11 @@ def load_saved_model():
     else:
         print(f"⚠️ {MODEL_PATH} の準備ができていないため、判定は利用できません。")
 
-# --- 【重要】Gunicorn起動時でも確実にロードを実行する ---
+# --- Gunicorn起動時でも確実にロードを実行する ---
 with app.app_context():
     load_saved_model()
 
-# --- 3. ルーティングと判定ロジック ---
+# --- ルーティングと判定ロジック ---
 
 @app.route('/')
 def index():
@@ -81,7 +82,7 @@ def predict():
     if model is None:
         load_saved_model()
         if model is None:
-            return jsonify({"error": "AIモデルのロードに失敗しています。ログを確認してください。"}), 500
+            return jsonify({"error": "AIモデルのロードに失敗しています。サーバーログを確認してください。"}), 500
     
     file = request.files.get('file')
     if not file:
@@ -91,8 +92,8 @@ def predict():
         # 画像の読み込み
         img_pil = Image.open(file.stream).convert('RGB')
         
-        # 巨大画像対策（さらに小さめの800pxに制限してメモリを強力に保護）
-        max_limit = 800
+        # 巨大画像対策（1000px程度に抑えつつ画質を維持）
+        max_limit = 1000
         if max(img_pil.size) > max_limit:
             img_pil.thumbnail((max_limit, max_limit), Image.Resampling.LANCZOS)
 
@@ -113,8 +114,8 @@ def predict():
             # 顔切り抜き
             face_crop = img_pil.crop((max(0, x), max(0, y), min(w, x + fw), min(h, y + fh)))
             
-            # モデル用に224x224へリサイズ
-            face_resize = face_crop.resize((224, 224))
+            # モデルの入力サイズ（224x224）へリサイズ
+            face_resize = face_crop.resize((224, 224), Image.Resampling.LANCZOS)
             
             # 推論用前処理
             x_input = image.img_to_array(face_resize)
@@ -122,7 +123,7 @@ def predict():
             x_input /= 255.0
 
             # 笑顔判定
-            preds = model.predict(x_input)
+            preds = model.predict(x_input, verbose=0)
             smile_score = float(preds[0][1]) 
 
             is_smile = smile_score > 0.5
@@ -137,7 +138,8 @@ def predict():
 
         # 結果画像のBase64化
         buffered = io.BytesIO()
-        img_pil.save(buffered, format="JPEG", quality=75) # 画質を下げてメモリ節約
+        # 画質を95に引き上げ、AIが特徴を捉えやすくする
+        img_pil.save(buffered, format="JPEG", quality=95) 
         img_str = base64.b64encode(buffered.getvalue()).decode()
 
         return jsonify({
@@ -147,7 +149,6 @@ def predict():
         })
 
     except Exception as e:
-        # エラーの全詳細をログに表示
         error_details = traceback.format_exc()
         print(f"❌ predict関数内でエラー発生:\n{error_details}")
         return jsonify({"error": f"サーバーエラー詳細:\n{str(e)}"}), 500
