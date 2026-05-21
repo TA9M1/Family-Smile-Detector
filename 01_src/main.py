@@ -29,7 +29,7 @@ face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_fronta
 # TFLite モデル設定
 # =========================================================
 # 💡 変更点: 保存先を整理した '03_models/' の tflite パスに指定
-MODEL_PATH = '03_models/best_smile_model_v4.tflite'
+MODEL_PATH = '03_models', 'best_smile_model_v4.tflite'
 interpreter = None
 input_details = None
 output_details = None
