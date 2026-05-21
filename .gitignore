@@ -2,20 +2,31 @@
 data/
 natural_data/
 smile_data/
+01_input/
 
 # --- Python仮想環境（uv / venv） ---
 .venv/
 __pycache__/
 *.py[cod]
 
+# --- VS Code の個人設定 ---
+.vscode/
+
 # --- OSが勝手に作る不要ファイル ---
 .DS_Store
 Thumbs.db
 
-# --- 大きなモデルファイル（GitHub制限に引っかかる場合） ---
-# もしGoogleドライブ経由で配布するなら、ここでも除外設定にします
-*.keras
-*.h5
+# --- AIモデルファイルの管理（フォルダ階層対応） ---
+# 03_models フォルダ内の重い Keras/H5 モデルは除外する
+03_models/*.keras
+03_models/*.h5
+
+# 💡【重要】軽量化した TFLite モデルだけは GitHub へのアップロードを許可する！
+!03_models/best_smile_model_v4.tflite
+
+# --- 訓練の出力結果（必要に応じて） ---
+# もしグラフ画像を GitHub に上げたくない場合は、下のコメントアウト(#)を外してください
+# 04_output/
 
 # --- Renderなどの一時ファイル ---
 .render/
