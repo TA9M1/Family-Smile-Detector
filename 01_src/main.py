@@ -13,9 +13,8 @@ from tensorflow.keras.preprocessing import image
 from PIL import Image, ImageDraw
 
 # =========================================================
-# Flask アプリ初期化設定 (修正箇所)
+# Flask アプリ初期化設定
 # =========================================================
-# main.pyから見て、1つ上の階層（..）にある「templates」と「static」を指定します。
 app = Flask(
     __name__, 
     template_folder=os.path.join(os.path.dirname(__file__), '..', 'templates'),
@@ -26,10 +25,11 @@ app = Flask(
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
 # =========================================================
-# TFLite モデル設定
+# TFLite モデル設定 (★タプルエラーと絶対パスを修正)
 # =========================================================
-# 💡 変更点: 保存先を整理した '03_models/' の tflite パスに指定
-MODEL_PATH = '03_models', 'best_smile_model_v4.tflite'
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MODEL_PATH = os.path.join(BASE_DIR, '03_models', 'best_smile_model_v4.tflite')
+
 interpreter = None
 input_details = None
 output_details = None
@@ -38,11 +38,11 @@ def load_tflite_model():
     global interpreter, input_details, output_details
     if os.path.exists(MODEL_PATH):
         try:
-            # 💡 TFLite専用の読み込み方法（インプリターの起動）
+            # 💡 TFLite専用の読み込み方法
             interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
             interpreter.allocate_tensors()
             
-            # 入出力テンソルの情報を取得（データの型や形を確認するため）
+            # 入出力テンソルの情報を取得
             input_details = interpreter.get_input_details()
             output_details = interpreter.get_output_details()
             print(f"✅ TFLiteモデル '{MODEL_PATH}' のロードに成功しました。")
@@ -89,9 +89,11 @@ def predict():
             # VGG16用の解像度 224x224 にリサイズ
             face_resize = face_crop.resize((224, 224))
             
-            x_input = image.img_to_array(face_resize)
+            # ★【メモリ節約の修正箇所】
+            # 従来の image.img_to_array(face_resize) は裏で重いTensorFlowの処理が走るため、
+            # 本番環境では純粋な NumPy 処理（np.array）に切り替えてメモリを大幅に節約します。
+            x_input = np.array(face_resize, dtype=np.float32)
             x_input = np.expand_dims(x_input, axis=0) / 255.0
-            x_input = x_input.astype(np.float32) # TFLiteは型に厳密なため float32 に明示的に変換
 
             # 💡 TFLiteでの推論実行手順
             interpreter.set_tensor(input_details[0]['index'], x_input)
